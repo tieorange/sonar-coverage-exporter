@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Sonar Coverage Exporter",
+  "description": "Export uncovered SonarQube lines as a markdown prompt for AI-assisted testing.",
+  "version": "0.1.0",
+  "permissions": ["activeTab", "scripting", "downloads"],
+  "host_permissions": ["https://*/component_measures*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Sonar Coverage Exporter"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*/component_measures*"],
+      "js": ["dist/content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

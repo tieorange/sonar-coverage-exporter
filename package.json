@@ -1,0 +1,15 @@
+{
+  "name": "sonar-coverage-exporter",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && esbuild src/content-script.ts src/popup.ts --bundle --sourcemap --outdir=dist --format=iife --target=chrome115"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.261",
+    "typescript": "^5.4.0",
+    "esbuild": "^0.21.5"
+  }
+}
