@@ -1,4 +1,4 @@
-import { CoverageGroup, CoverageReport } from './types';
+import { CollectCoverageFailure, CoverageGroup, CoverageReport } from './types';
 
 const formatDateTime = (isoString: string): string => {
   try {
@@ -78,6 +78,16 @@ const buildSnippet = (group: CoverageGroup): string => {
 };
 
 const MAX_SUMMARY_LENGTH = 120;
+const CLUSTER_GAP = 4;
+
+interface CoverageCluster {
+  startLine: number;
+  endLine: number;
+  groups: CoverageGroup[];
+}
+
+const escapeTableCell = (value: string): string =>
+  value.replace(/\|/g, '\\|').replace(/\n/g, '<br />');
 
 const summariseGroup = (group: CoverageGroup): string => {
   const snippet = group.lines.map((line) => line.code.trim()).find((entry) => entry.length > 0);
@@ -93,27 +103,102 @@ const summariseGroup = (group: CoverageGroup): string => {
 const sanitiseForFileName = (input: string): string =>
   input.replace(/[\\/]+/g, '_').replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/_+/g, '_');
 
-export const generateMarkdown = (report: CoverageReport): { fileName: string; content: string } => {
+const clusterGroups = (groups: CoverageGroup[]): CoverageCluster[] => {
+  if (!groups.length) {
+    return [];
+  }
+
+  const clusters: CoverageCluster[] = [];
+  let current: CoverageCluster | null = null;
+
+  groups.forEach((group) => {
+    if (!current || group.startLine - current.endLine > CLUSTER_GAP) {
+      current = {
+        startLine: group.startLine,
+        endLine: group.endLine,
+        groups: [group],
+      };
+      clusters.push(current);
+      return;
+    }
+
+    current.endLine = Math.max(current.endLine, group.endLine);
+    current.groups.push(group);
+  });
+
+  return clusters;
+};
+
+const formatLinesCount = (count: number): string => (count === 1 ? '1 line' : `${count} lines`);
+
+const formatClusterRange = (cluster: CoverageCluster): string =>
+  cluster.startLine === cluster.endLine
+    ? `line ${cluster.startLine}`
+    : `lines ${cluster.startLine}-${cluster.endLine}`;
+
+const summariseCluster = (cluster: CoverageCluster): string => {
+  const snippets = cluster.groups
+    .map((group) => summariseGroup(group))
+    .filter((snippet) => snippet !== '[blank line]');
+  if (!snippets.length) {
+    return 'Exercise the logic in this region.';
+  }
+  if (snippets.length === 1) {
+    return snippets[0];
+  }
+  const uniqueSnippets = Array.from(new Set(snippets));
+  if (uniqueSnippets.length === 1) {
+    return uniqueSnippets[0];
+  }
+  return `${uniqueSnippets[0]} … ${uniqueSnippets[uniqueSnippets.length - 1]}`;
+};
+
+interface RenderSingleOptions {
+  baseLevel?: number;
+  title?: string;
+  includeShareLine?: boolean;
+}
+
+const renderSingleReport = (report: CoverageReport, options: RenderSingleOptions = {}): string => {
+  const baseLevel = options.baseLevel ?? 1;
+  const includeShareLine = options.includeShareLine ?? true;
+  const heading = (offset: number, text: string): string =>
+    `${'#'.repeat(Math.min(baseLevel + offset, 6))} ${text}`;
+
   const language = guessLanguage(report.filePath);
-  const quickRanges = report.groups.map((group) => `- ${formatRange(group)}`).join('\n');
-  const groupSections = report.groups
-    .map((group) => {
-      const rangeLabel = formatRange(group);
-      const snippet = buildSnippet(group);
-      const codeFenceOpen = language ? `\`\`\`${language}` : '```';
-      return [
-        `### ${rangeLabel}`,
-        '',
-        codeFenceOpen,
-        snippet,
-        '```',
-        '',
-      ].join('\n');
+  const clusters = clusterGroups(report.groups);
+  const longestBlock = report.groups.reduce<{
+    lines: number;
+    range: string;
+  } | null>((acc, group) => {
+    const length = group.lines.length;
+    if (!acc || length > acc.lines) {
+      return { lines: length, range: formatRange(group) };
+    }
+    return acc;
+  }, null);
+  const longestBlockText = longestBlock
+    ? `${longestBlock.range} (${formatLinesCount(longestBlock.lines)})`
+    : 'n/a';
+
+  const rangeBulletList = report.groups.map((group) => `- ${formatRange(group)}`).join('\n');
+  const rangeTable = [
+    '| Range | Lines | Highlight |',
+    '| :---- | ----: | :-------- |',
+    ...report.groups.map((group) =>
+      `| ${formatRange(group)} | ${group.lines.length} | ${escapeTableCell(summariseGroup(group))} |`,
+    ),
+  ].join('\n');
+
+  const hotspotBullets = clusters
+    .map((cluster) => {
+      const totalLines = cluster.groups.reduce((sum, group) => sum + group.lines.length, 0);
+      return `- 🔥 ${formatClusterRange(cluster)} · ${cluster.groups.length} block(s), ${formatLinesCount(totalLines)} – ${summariseCluster(cluster)}`;
     })
     .join('\n');
 
   const descriptiveBullets = report.groups
-    .map((group) => `- ${formatRange(group)} - ${summariseGroup(group)}`)
+    .map((group) => `- 📌 ${formatRange(group)} – ${summariseGroup(group)}`)
     .join('\n');
 
   const promptHeaderLines = report.groups.map((group) => `  * ${formatRange(group)}`).join('\n');
@@ -124,42 +209,127 @@ export const generateMarkdown = (report: CoverageReport): { fileName: string; co
     promptHeaderLines,
     'For each block, propose or implement tests that execute the code paths shown in the snippets above so SonarQube reports full coverage.',
     `Reference the SonarQube page for context: ${report.url}`,
+    'Follow tests examples in our codebase and /docs/ folder and follow rules in the .cursorrules file.',
     'Limit changes to the impacted file and related test suites only.',
+    'Return actionable test updates or code snippets that raise coverage for the listed ranges.',
   ]
     .filter(Boolean)
     .join('\n');
 
+  const codeSections = report.groups
+    .map((group) => {
+      const rangeLabel = formatRange(group);
+      const snippet = buildSnippet(group);
+      const codeFenceOpen = language ? `\`\`\`${language}` : '```';
+      return [
+        heading(2, `🔸 ${rangeLabel}`),
+        '',
+        codeFenceOpen,
+        snippet,
+        '```',
+        '',
+      ].join('\n');
+    })
+    .join('\n');
+
   const sections = [
-    '# SonarQube New-Code Coverage Gaps',
+    heading(0, options.title ?? 'SonarQube Coverage Gaps 📉'),
     '',
     `- **Project**: ${report.projectName}`,
     `- **File**: \`${report.filePath}\``,
     `- **Generated**: ${formatDateTime(report.generatedAt)}`,
     `- **SonarQube page**: ${report.url}`,
     '',
-    '## Quick Snapshot',
-    `- Uncovered new-code lines: **${report.totalUncoveredLines}**`,
-    `- Blocks captured: **${report.groups.length}**`,
+    heading(1, 'Quick Snapshot 📊'),
+    `- 🔢 Uncovered new-code lines: **${report.totalUncoveredLines}**`,
+    `- 🔁 Blocks captured: **${report.groups.length}**`,
+    `- 🧵 Longest block: ${longestBlockText}`,
+    `- 🔥 Hotspot groups: **${clusters.length}**`,
     '',
-    '### Line ranges',
-    quickRanges,
+    heading(2, 'Range Overview 🗂️'),
+    rangeTable,
     '',
-    '### Notable statements',
+    heading(2, 'Notable Statements 📌'),
     descriptiveBullets,
-    '',
-    '## Code gaps',
-    groupSections,
-    '---',
-    '## Ready-to-use Prompt',
-    '```text',
-    prompt,
-    '```',
     '',
   ];
 
+  if (clusters.length) {
+    sections.push(heading(1, 'Coverage Hotspots 🔥'), hotspotBullets, '');
+  }
+
+  sections.push(heading(1, 'Code Gaps 🔍'), rangeBulletList, '', codeSections, '---');
+  sections.push(heading(1, 'Ready-to-use Prompt 🤖'), '```text', prompt, '```', '');
+
+  if (includeShareLine) {
+    sections.push('🚀 Share this report with your tooling or teammates to close the coverage gaps efficiently.');
+  }
+
+  return sections.join('\n');
+};
+
+export const generateMarkdown = (report: CoverageReport): { fileName: string; content: string } => {
   const timestamp = sanitiseForFileName(new Date().toISOString());
   const fileSafePath = sanitiseForFileName(report.filePath);
   const fileName = `sonar-coverage_${fileSafePath}_${timestamp}.md`;
+  const content = renderSingleReport(report);
+  return { fileName, content };
+};
+
+interface BundleOptions {
+  skipped?: CollectCoverageFailure[];
+}
+
+export const generateBundleMarkdown = (
+  reports: CoverageReport[],
+  options: BundleOptions = {},
+): { fileName: string; content: string } => {
+  if (!reports.length) {
+    throw new Error('No coverage reports to export.');
+  }
+
+  const timestamp = sanitiseForFileName(new Date().toISOString());
+  const fileName = `sonar-coverage_bundle_${timestamp}.md`;
+  const totalLines = reports.reduce((sum, report) => sum + report.totalUncoveredLines, 0);
+  const totalBlocks = reports.reduce((sum, report) => sum + report.groups.length, 0);
+  const projects = Array.from(new Set(reports.map((report) => report.projectName)));
+
+  const overviewTable = [
+    '| File | Project | Blocks | Lines |',
+    '| :---- | :------ | ----: | ----: |',
+    ...reports.map((report) =>
+      `| ${escapeTableCell(report.filePath)} | ${escapeTableCell(report.projectName)} | ${report.groups.length} | ${report.totalUncoveredLines} |`,
+    ),
+  ].join('\n');
+
+  const sections: string[] = [
+    '# SonarQube Coverage Rollup 📈',
+    '',
+    `- 🗂️ Files analysed: **${reports.length}**`,
+    `- 🔢 Total uncovered lines: **${totalLines}**`,
+    `- 🔁 Total uncovered blocks: **${totalBlocks}**`,
+    `- 🏷️ Projects: ${projects.map((project) => `\`${project}\``).join(', ') || 'n/a'}`,
+  ];
+
+  if (options.skipped?.length) {
+    sections.push('', '> ⚠️ Some files could not be processed:');
+    options.skipped.forEach((skipped) => {
+      const note = skipped.error ?? 'Unknown error';
+      sections.push(`> - ${note}`);
+    });
+  }
+
+  sections.push('', '## File Overview', overviewTable, '', '## Detailed Reports');
+
+  reports.forEach((report) => {
+    sections.push('', renderSingleReport(report, {
+      baseLevel: 2,
+      title: `📄 ${report.filePath}`,
+      includeShareLine: false,
+    }));
+  });
+
+  sections.push('', '🚀 Share this bundle with your tooling or teammates to close the coverage gaps efficiently.');
 
   return {
     fileName,

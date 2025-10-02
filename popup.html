@@ -19,6 +19,12 @@
         font-size: 16px;
         margin: 0 0 8px;
       }
+      .actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
       button {
         all: unset;
         display: inline-flex;
@@ -49,7 +55,10 @@
   <body>
     <main>
       <h1>Sonar Coverage Exporter</h1>
-      <button id="export-button">Export uncovered lines</button>
+      <div class="actions">
+        <button id="export-button">Export current file</button>
+        <button id="export-all-button">Export all uncovered files</button>
+      </div>
       <p id="status" aria-live="polite"></p>
     </main>
     <script src="dist/popup.js"></script>

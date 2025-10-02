@@ -1,4 +1,4 @@
-export type CoverageMessageType = 'COLLECT_COVERAGE';
+export type CoverageMessageType = 'COLLECT_COVERAGE' | 'COLLECT_ALL_COVERAGE';
 
 export interface CoverageLine {
   lineNumber: number;
@@ -20,18 +20,30 @@ export interface CoverageReport {
   groups: CoverageGroup[];
 }
 
-export interface CollectCoverageMessage {
-  type: CoverageMessageType;
-}
+export type CollectCoverageMessage =
+  | { type: 'COLLECT_COVERAGE' }
+  | { type: 'COLLECT_ALL_COVERAGE' };
 
 export interface CollectCoverageSuccess {
   success: true;
+  kind: 'single';
   report: CoverageReport;
 }
 
 export interface CollectCoverageFailure {
   success: false;
+  url?: string;
   error: string;
 }
 
-export type CollectCoverageResponse = CollectCoverageSuccess | CollectCoverageFailure;
+export interface CollectAllCoverageSuccess {
+  success: true;
+  kind: 'all';
+  reports: CoverageReport[];
+  skipped: CollectCoverageFailure[];
+}
+
+export type CollectCoverageResponse =
+  | CollectCoverageSuccess
+  | CollectAllCoverageSuccess
+  | CollectCoverageFailure;

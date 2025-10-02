@@ -12,3 +12,8 @@ Improve the prompt that we generated. And add to prompt such text:
 "Follow tests examples in our codebase and /docs/ folder and follow rules in the .cursorrules file"
 
 - It works. I made a report. they are in /reports/ folder. Analyze them and improve the code to improve the report generation. Those reports should be clear for people and other LLMs. Add emojis to report
+
+-----
+Now our extension can download only 1 report for 1 file.
+Make our extension to be able to download all file reports and merge it into 1 readable .md file report that includes all files that sonarQube showed as (that needs to increase coverage)
+Source code of main page of SonarQube - `source-sonar-qube/master-page.html`
