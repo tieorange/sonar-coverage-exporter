@@ -33,7 +33,9 @@ export interface CollectCoverageSuccess {
 export interface CollectCoverageFailure {
   success: false;
   url?: string;
+  label?: string;
   error: string;
+  details?: string;
 }
 
 export interface CollectAllCoverageSuccess {
@@ -47,3 +49,14 @@ export type CollectCoverageResponse =
   | CollectCoverageSuccess
   | CollectAllCoverageSuccess
   | CollectCoverageFailure;
+
+export type LoggedErrorSource = 'single' | 'bundle' | 'skipped' | 'system';
+
+export interface LoggedError {
+  id: string;
+  timestamp: string;
+  source: LoggedErrorSource;
+  message: string;
+  url?: string;
+  details?: string;
+}

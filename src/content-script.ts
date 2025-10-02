@@ -247,38 +247,204 @@ const createCoverageExtractor = (rootDoc: Document) => {
   return { buildCoverageReport };
 };
 
-const gatherFileLinks = (): Map<string, { href: string; label: string }> => {
-  const anchors = Array.from(
-    document.querySelectorAll<HTMLAnchorElement>('main a[href*="selected="]'),
-  );
+const collectLinksFromDocument = (
+  root: Document,
+): Map<string, { href: string; label: string }> => {
+  const selector = 'a[href*="selected="]';
+  const anchors = Array.from(root.querySelectorAll<HTMLAnchorElement>(selector));
 
   const files = new Map<string, { href: string; label: string }>();
 
   anchors.forEach((anchor) => {
-    const rawHref = anchor.href;
+    const rawHref = anchor.getAttribute('href');
     if (!rawHref) {
       return;
     }
-    const url = new URL(rawHref, window.location.href);
-    const selected = url.searchParams.get('selected');
+
+    let absolute: URL;
+    try {
+      absolute = new URL(rawHref, window.location.href);
+    } catch (_error) {
+      return;
+    }
+
+    const selected = absolute.searchParams.get('selected');
     if (!selected) {
       return;
     }
+
     if (files.has(selected)) {
       return;
     }
-    const label = anchor.getAttribute('title')?.trim() ?? anchor.textContent?.trim() ?? selected;
-    files.set(selected, { href: url.toString(), label });
+
+    const label =
+      anchor.getAttribute('title')?.trim() ??
+      anchor.textContent?.trim() ??
+      selected;
+
+    files.set(selected, { href: absolute.toString(), label });
   });
 
   return files;
 };
 
+const gatherFileLinks = async (): Promise<Map<string, { href: string; label: string }>> => {
+  const filesFromDom = collectLinksFromDocument(document);
+  if (filesFromDom.size > 0) {
+    return filesFromDom;
+  }
+
+  try {
+    const response = await fetch(window.location.href, { credentials: 'same-origin' });
+    if (!response.ok) {
+      throw new Error(`Request failed with status ${response.status}`);
+    }
+    const html = await response.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    return collectLinksFromDocument(doc);
+  } catch (_error) {
+    return new Map();
+  }
+};
+
+const waitForElement = (
+  doc: Document,
+  selector: string,
+  timeoutMs: number,
+  intervalMs: number,
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    const start = Date.now();
+
+    const check = () => {
+      if (doc.querySelector(selector)) {
+        resolve();
+        return;
+      }
+      if (Date.now() - start >= timeoutMs) {
+        reject(new Error(`Timed out waiting for selector: ${selector}`));
+        return;
+      }
+      window.setTimeout(check, intervalMs);
+    };
+
+    check();
+  });
+
+const loadDocumentViaIframe = async (href: string): Promise<Document> =>
+  new Promise((resolve, reject) => {
+    const container = document.createElement('div');
+    container.style.position = 'fixed';
+    container.style.width = '0';
+    container.style.height = '0';
+    container.style.overflow = 'hidden';
+    container.style.opacity = '0';
+    container.style.pointerEvents = 'none';
+
+    const iframe = document.createElement('iframe');
+    iframe.style.border = '0';
+    iframe.style.width = '1280px';
+    iframe.style.height = '720px';
+    iframe.src = href;
+
+    const cleanup = () => {
+      iframe.src = 'about:blank';
+      container.remove();
+    };
+
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error('Timed out loading file view.'));
+    }, 20000);
+
+    iframe.addEventListener('load', () => {
+      const iframeDoc = iframe.contentDocument;
+      if (!iframeDoc) {
+        window.clearTimeout(timeout);
+        cleanup();
+        reject(new Error('Unable to access file document.'));
+        return;
+      }
+
+      waitForElement(iframeDoc, SOURCE_CONTAINER_SELECTOR, 12000, 300)
+        .then(() => {
+          window.clearTimeout(timeout);
+          resolve(iframeDoc);
+          cleanup();
+        })
+        .catch((error) => {
+          window.clearTimeout(timeout);
+          cleanup();
+          reject(error);
+        });
+    });
+
+    container.appendChild(iframe);
+    document.body.appendChild(container);
+  });
+
+const fetchDocument = async (href: string): Promise<Document> => {
+  const response = await fetch(href, { credentials: 'same-origin' });
+  if (!response.ok) {
+    throw new Error(`Request failed with status ${response.status}`);
+  }
+  const html = await response.text();
+  const parser = new DOMParser();
+  return parser.parseFromString(html, 'text/html');
+};
+
+type ProgressUpdate = {
+  processed: number;
+  total: number;
+  label: string;
+  startedAt: number;
+};
+
+const createProgressReporter = (total: number) => {
+  const startedAt = Date.now();
+  let processed = 0;
+
+  const emit = (label: string) => {
+    processed = Math.min(processed + 1, total);
+    const payload: ProgressUpdate = {
+      processed,
+      total,
+      label,
+      startedAt,
+    };
+    chrome.runtime.sendMessage({ type: 'COVERAGE_PROGRESS_UPDATE', payload });
+  };
+
+  const start = () => {
+    const payload: ProgressUpdate = {
+      processed,
+      total,
+      label: 'Preparing…',
+      startedAt,
+    };
+    chrome.runtime.sendMessage({ type: 'COVERAGE_PROGRESS_UPDATE', payload });
+  };
+
+  const complete = () => {
+    chrome.runtime.sendMessage({
+      type: 'COVERAGE_PROGRESS_COMPLETE',
+      payload: {
+        processed,
+        total,
+      },
+    });
+  };
+
+  return { emit, start, complete };
+};
+
+
 const collectAllCoverageReports = async (): Promise<{
   reports: CoverageReport[];
   skipped: CollectCoverageFailure[];
 }> => {
-  const files = gatherFileLinks();
+  const files = await gatherFileLinks();
   if (!files.size) {
     throw new Error(
       'Could not find any file links on this page. Switch to the project "New Code" list view and try again.',
@@ -287,25 +453,73 @@ const collectAllCoverageReports = async (): Promise<{
 
   const reports: CoverageReport[] = [];
   const skipped: CollectCoverageFailure[] = [];
-  const parser = new DOMParser();
+  const progress = createProgressReporter(files.size);
+
+  progress.start();
 
   for (const { href, label } of files.values()) {
     try {
-      const response = await fetch(href, { credentials: 'same-origin' });
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
+      let lastError: Error | null = null;
+
+      const tryBuildFromDocument = async (doc: Document): Promise<CoverageReport> => {
+        const extractor = createCoverageExtractor(doc);
+        return extractor.buildCoverageReport(href);
+      };
+
+      try {
+        const fetchedDoc = await fetchDocument(href);
+        const report = await tryBuildFromDocument(fetchedDoc);
+        reports.push(report);
+        progress.emit(label);
+        continue;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
       }
-      const html = await response.text();
-      const doc = parser.parseFromString(html, 'text/html');
-      const extractor = createCoverageExtractor(doc);
-      const report = extractor.buildCoverageReport(href);
-      reports.push(report);
+
+      try {
+        const iframeDoc = await loadDocumentViaIframe(href);
+        const report = await tryBuildFromDocument(iframeDoc);
+        reports.push(report);
+        progress.emit(label);
+        continue;
+      } catch (iframeError) {
+        const detailsParts: string[] = [];
+        if (lastError) {
+          detailsParts.push(`Fetch attempt: ${lastError.message}`);
+          if (lastError.stack) {
+            detailsParts.push(lastError.stack);
+          }
+        }
+        if (iframeError instanceof Error) {
+          detailsParts.push(`Iframe attempt: ${iframeError.message}`);
+          if (iframeError.stack) {
+            detailsParts.push(iframeError.stack);
+          }
+        } else {
+          detailsParts.push(`Iframe attempt: ${String(iframeError)}`);
+        }
+
+        const details = detailsParts.join('\n');
+        const message = iframeError instanceof Error ? iframeError.message : String(iframeError);
+        skipped.push({
+          success: false,
+          url: href,
+          label,
+          error: `${label}: ${message}`,
+          details,
+        });
+        progress.emit(`${label} (skipped)`);
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unable to build coverage report for this file.';
-      skipped.push({ success: false, url: href, error: `${label}: ${message}` });
+      const details = error instanceof Error && error.stack ? error.stack : undefined;
+      skipped.push({ success: false, url: href, label, error: `${label}: ${message}`, details });
+      progress.emit(`${label} (error)`);
     }
   }
+
+  progress.complete();
 
   return { reports, skipped };
 };

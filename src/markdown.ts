@@ -1,4 +1,4 @@
-import { CollectCoverageFailure, CoverageGroup, CoverageReport } from './types';
+import { CollectCoverageFailure, CoverageGroup, CoverageReport, LoggedError } from './types';
 
 const formatDateTime = (isoString: string): string => {
   try {
@@ -190,15 +190,31 @@ const renderSingleReport = (report: CoverageReport, options: RenderSingleOptions
     ),
   ].join('\n');
 
-  const hotspotBullets = clusters
-    .map((cluster) => {
-      const totalLines = cluster.groups.reduce((sum, group) => sum + group.lines.length, 0);
-      return `- 🔥 ${formatClusterRange(cluster)} · ${cluster.groups.length} block(s), ${formatLinesCount(totalLines)} – ${summariseCluster(cluster)}`;
-    })
-    .join('\n');
+  const clusterChecklist = clusters.length
+    ? clusters.map((cluster) => {
+        const totalLines = cluster.groups.reduce((sum, group) => sum + group.lines.length, 0);
+        return `- 🔥 ${formatClusterRange(cluster)} · ${cluster.groups.length} block(s), ${formatLinesCount(totalLines)} – ${summariseCluster(cluster)}`;
+      })
+    : report.groups
+        .slice(0, Math.min(10, report.groups.length))
+        .map((group) => `- ✅ ${formatRange(group)} – ${summariseGroup(group)}`);
 
-  const descriptiveBullets = report.groups
-    .map((group) => `- 📌 ${formatRange(group)} – ${summariseGroup(group)}`)
+  const interestingGroups = report.groups
+    .map((group) => ({ group, summary: summariseGroup(group) }))
+    .filter(({ summary }) => summary !== '[blank line]')
+    .filter(({ summary }) => {
+      const normalized = summary.trim().toLowerCase();
+      return !normalized.startsWith('log') && !normalized.startsWith('print') && normalized.length > 3;
+    })
+    .slice(0, 8);
+
+  const notableItems =
+    interestingGroups.length
+      ? interestingGroups
+      : report.groups.slice(0, 5).map((group) => ({ group, summary: summariseGroup(group) }));
+
+  const notableBullets = notableItems
+    .map(({ group, summary }) => `- 📌 ${formatRange(group)} – ${summary ?? summariseGroup(group)}`)
     .join('\n');
 
   const promptHeaderLines = report.groups.map((group) => `  * ${formatRange(group)}`).join('\n');
@@ -208,10 +224,6 @@ const renderSingleReport = (report: CoverageReport, options: RenderSingleOptions
     `Target the following ${report.groups.length} uncovered block(s):`,
     promptHeaderLines,
     'For each block, propose or implement tests that execute the code paths shown in the snippets above so SonarQube reports full coverage.',
-    `Reference the SonarQube page for context: ${report.url}`,
-    'Follow tests examples in our codebase and /docs/ folder and follow rules in the .cursorrules file.',
-    'Limit changes to the impacted file and related test suites only.',
-    'Return actionable test updates or code snippets that raise coverage for the listed ranges.',
   ]
     .filter(Boolean)
     .join('\n');
@@ -246,20 +258,28 @@ const renderSingleReport = (report: CoverageReport, options: RenderSingleOptions
     `- 🧵 Longest block: ${longestBlockText}`,
     `- 🔥 Hotspot groups: **${clusters.length}**`,
     '',
+    heading(2, 'Testing Checklist ✅'),
+    clusterChecklist.length ? clusterChecklist.join('\n') : '_No hotspots detected via clustering._',
+    '',
     heading(2, 'Range Overview 🗂️'),
     rangeTable,
     '',
-    heading(2, 'Notable Statements 📌'),
-    descriptiveBullets,
+    heading(2, 'Noteworthy Logic 📌'),
+    notableBullets,
     '',
   ];
 
-  if (clusters.length) {
-    sections.push(heading(1, 'Coverage Hotspots 🔥'), hotspotBullets, '');
-  }
-
   sections.push(heading(1, 'Code Gaps 🔍'), rangeBulletList, '', codeSections, '---');
   sections.push(heading(1, 'Ready-to-use Prompt 🤖'), '```text', prompt, '```', '');
+
+  sections.push(
+    heading(1, 'Guidance & Constraints 🛠️'),
+    '- Review existing automated tests and documentation for reference patterns.',
+    '- Follow the project conventions defined in `.cursorrules`.',
+    '- Keep code changes scoped to the impacted areas and their related test suites.',
+    '- Deliver concrete test updates or code snippets that measurably improve coverage.',
+    '',
+  );
 
   if (includeShareLine) {
     sections.push('🚀 Share this report with your tooling or teammates to close the coverage gaps efficiently.');
@@ -316,6 +336,11 @@ export const generateBundleMarkdown = (
     options.skipped.forEach((skipped) => {
       const note = skipped.error ?? 'Unknown error';
       sections.push(`> - ${note}`);
+      if (skipped.details) {
+        sections.push('>```text');
+        sections.push(...skipped.details.split('\n').map((line) => `> ${line}`));
+        sections.push('>```');
+      }
     });
   }
 
@@ -330,6 +355,76 @@ export const generateBundleMarkdown = (
   });
 
   sections.push('', '🚀 Share this bundle with your tooling or teammates to close the coverage gaps efficiently.');
+
+  return {
+    fileName,
+    content: sections.join('\n'),
+  };
+};
+
+export const generateErrorLogMarkdown = (errors: LoggedError[]): {
+  fileName: string;
+  content: string;
+} => {
+  const timestamp = sanitiseForFileName(new Date().toISOString());
+  const fileName = `sonar-coverage_errors_${timestamp}.md`;
+
+  if (!errors.length) {
+    return {
+      fileName,
+      content: '# Sonar Coverage Exporter Errors\n\n_No errors have been recorded in this session._',
+    };
+  }
+
+  const totalBySource = errors.reduce<Record<string, number>>((acc, error) => {
+    acc[error.source] = (acc[error.source] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const overviewTable = [
+    '| Recorded | Source | Message | URL |',
+    '| :------- | :----- | :------ | :-- |',
+    ...errors.map((error) =>
+      `| ${formatDateTime(error.timestamp)} | ${escapeTableCell(error.source)} | ${escapeTableCell(error.message)} | ${escapeTableCell(error.url ?? '-')} |`,
+    ),
+  ].join('\n');
+
+  const detailSections = errors
+    .map((error, index) => {
+      const heading = `### ❗ Error ${index + 1}`;
+      const lines = [
+        heading,
+        '',
+        `- **Source**: ${error.source}`,
+        `- **Recorded**: ${formatDateTime(error.timestamp)}`,
+        error.url ? `- **URL**: ${error.url}` : null,
+        `- **Message**: ${error.message}`,
+      ].filter(Boolean) as string[];
+
+      if (error.details) {
+        lines.push('', '```text', error.details, '```');
+      }
+
+      return lines.join('\n');
+    })
+    .join('\n\n');
+
+  const sourceSummary = Object.entries(totalBySource)
+    .map(([source, count]) => `- ${source}: **${count}**`)
+    .join('\n');
+
+  const sections = [
+    '# Sonar Coverage Exporter Errors 📋',
+    '',
+    `- Total entries: **${errors.length}**`,
+    sourceSummary ? `- Breakdown by source:\n${sourceSummary}` : '',
+    '',
+    '## Error Overview',
+    overviewTable,
+    '',
+    '## Detailed Records',
+    detailSections,
+  ].filter(Boolean);
 
   return {
     fileName,

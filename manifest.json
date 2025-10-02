@@ -3,11 +3,21 @@
   "name": "Sonar Coverage Exporter",
   "description": "Export uncovered SonarQube lines as a markdown prompt for AI-assisted testing.",
   "version": "0.1.0",
-  "permissions": ["activeTab", "scripting", "downloads"],
+  "permissions": ["activeTab", "scripting", "downloads", "storage"],
   "host_permissions": ["https://*/component_measures*"],
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "128": "assets/icon-128.png"
+  },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Sonar Coverage Exporter"
+    "default_title": "Sonar Coverage Exporter",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png",
+      "128": "assets/icon-128.png"
+    }
   },
   "content_scripts": [
     {

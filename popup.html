@@ -6,49 +6,149 @@
     <style>
       :root {
         color-scheme: light dark;
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
         font-size: 14px;
       }
       body {
         margin: 0;
-        padding: 12px;
+        padding: 18px 18px 16px;
         width: 320px;
-        background: #0b0b0b08;
+        background: radial-gradient(120% 120% at 0% 0%, rgba(0, 120, 212, 0.15), rgba(11, 27, 51, 0.85));
+        color: #f5f7fa;
+      }
+      main {
+        background: rgba(8, 14, 26, 0.78);
+        border-radius: 14px;
+        padding: 18px;
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.25);
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
       }
       h1 {
-        font-size: 16px;
-        margin: 0 0 8px;
+        font-size: 18px;
+        font-weight: 700;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h1::before {
+        content: "📡";
+        font-size: 20px;
+      }
+      .subhead {
+        margin: 0;
+        color: rgba(245, 247, 250, 0.8);
+        line-height: 1.5;
       }
       .actions {
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        margin-bottom: 8px;
+        gap: 10px;
       }
       button {
         all: unset;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 6px 12px;
-        border-radius: 6px;
+        padding: 10px 14px;
+        border-radius: 10px;
         font-weight: 600;
         cursor: pointer;
-        border: 1px solid #0078d4;
-        color: #fff;
-        background: linear-gradient(135deg, #0078d4, #005a9e);
+        transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.2s;
       }
       button[disabled] {
-        opacity: 0.6;
+        opacity: 0.55;
         cursor: not-allowed;
+        transform: none !important;
+        box-shadow: none !important;
       }
-      p {
-        margin: 8px 0 0;
-        line-height: 1.4;
+      .primary {
+        background: linear-gradient(135deg, #0f62fe, #33b1ff);
+        color: #fff;
+        box-shadow: 0 10px 20px rgba(15, 98, 254, 0.35);
       }
-      code {
-        font-family: ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      .primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 28px rgba(15, 98, 254, 0.45);
+      }
+      .secondary {
+        background: rgba(255, 255, 255, 0.08);
+        color: #f5f7fa;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+      }
+      .secondary:hover {
+        transform: translateY(-1px);
+        background: rgba(255, 255, 255, 0.12);
+      }
+      .status {
+        min-height: 18px;
+        font-size: 13px;
+        margin: 0;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(245, 247, 250, 0.9);
+      }
+      .status:empty {
+        display: none;
+      }
+      .status.error {
+        background: rgba(255, 68, 68, 0.15);
+        color: #ffb3b3;
+      }
+      .status strong {
+        color: #fff;
+      }
+      .status small {
+        display: block;
+        margin-top: 4px;
+        color: rgba(245, 247, 250, 0.7);
+        font-size: 11px;
+        letter-spacing: 0.2px;
+      }
+      .progress {
+        display: none;
+        flex-direction: column;
+        gap: 6px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 10px 12px;
+      }
+      .progress.visible {
+        display: flex;
+      }
+      .progress__header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
         font-size: 12px;
+        color: rgba(245, 247, 250, 0.82);
+      }
+      .progress__bar {
+        position: relative;
+        height: 8px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .progress__fill {
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 0%;
+        border-radius: inherit;
+        background: linear-gradient(135deg, #0f62fe, #33b1ff);
+        transition: width 0.18s ease;
+      }
+      .progress__meta {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        color: rgba(245, 247, 250, 0.7);
+        letter-spacing: 0.2px;
       }
     </style>
   </head>
@@ -56,10 +156,23 @@
     <main>
       <h1>Sonar Coverage Exporter</h1>
       <div class="actions">
-        <button id="export-button">Export current file</button>
-        <button id="export-all-button">Export all uncovered files</button>
+        <button id="export-all-button" class="primary">Export uncovered files</button>
+        <button id="export-errors-button" class="secondary">Download error log</button>
       </div>
-      <p id="status" aria-live="polite"></p>
+      <div id="progress" class="progress" aria-live="polite">
+        <div class="progress__header">
+          <span id="progress-label">Preparing files…</span>
+          <span id="progress-percent">0%</span>
+        </div>
+        <div class="progress__bar">
+          <div id="progress-fill" class="progress__fill"></div>
+        </div>
+        <div class="progress__meta">
+          <span id="progress-count">0 / 0</span>
+          <span id="progress-eta">ETA: --</span>
+        </div>
+      </div>
+      <p id="status" class="status" aria-live="polite"></p>
     </main>
     <script src="dist/popup.js"></script>
   </body>
