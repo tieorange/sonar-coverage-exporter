@@ -12,52 +12,128 @@ type MessageListener = (
   sendResponse: (response: CollectCoverageResponse) => void,
 ) => true | void;
 
-const NOT_COVERED_ARIA_LABEL = 'Not covered by tests.';
+const SOURCE_CONTAINER_SELECTOR = '.source-viewer';
+const UNCOVERED_TEXT_PATTERN = /not\s+covered/i;
+const INDICATOR_ATTRIBUTES = ['aria-label', 'aria-describedby', 'title', 'data-tooltip'] as const;
+type IndicatorAttribute = (typeof INDICATOR_ATTRIBUTES)[number];
+
+const tooltipCache = new Map<string, string>();
+
+const getTooltipText = (id: string): string | undefined => {
+  if (tooltipCache.has(id)) {
+    const cached = tooltipCache.get(id);
+    return cached ? cached : undefined;
+  }
+
+  const element = document.getElementById(id);
+  const text = element?.textContent?.trim() ?? '';
+  tooltipCache.set(id, text);
+  return text || undefined;
+};
+
+const getAttributeTexts = (element: Element, attribute: IndicatorAttribute): string[] => {
+  if (attribute === 'aria-describedby') {
+    const describedBy = element.getAttribute(attribute);
+    if (!describedBy) {
+      return [];
+    }
+
+    return describedBy
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length > 0)
+      .map((token) => getTooltipText(token))
+      .filter((value): value is string => Boolean(value));
+  }
+
+  const value = element.getAttribute(attribute);
+  return value ? [value] : [];
+};
+
+const gatherIndicatorTexts = (element: Element): string[] => {
+  const values = INDICATOR_ATTRIBUTES.flatMap((attribute) => getAttributeTexts(element, attribute));
+  const textContent = element.textContent?.trim();
+  if (textContent) {
+    values.push(textContent);
+  }
+  return values;
+};
+
+const cellContainsUncoveredIndicator = (cell: Element): boolean => {
+  const nodes: Element[] = [cell, ...Array.from(cell.querySelectorAll<HTMLElement>('*'))];
+  return nodes.some((node) => gatherIndicatorTexts(node).some((text) => UNCOVERED_TEXT_PATTERN.test(text)));
+};
+
+const rowHasUncoveredIndicator = (row: Element): boolean => {
+  const statusCells = Array.from(row.querySelectorAll<HTMLTableCellElement>('td')).filter(
+    (cell) => !cell.classList.contains('it__source-line-code'),
+  );
+  if (statusCells.length) {
+    return statusCells.some(cellContainsUncoveredIndicator);
+  }
+
+  return cellContainsUncoveredIndicator(row);
+};
 
 const parseLineNumber = (row: Element): number | null => {
-  const direct = row.getAttribute('data-line-number');
-  if (direct) {
-    const parsed = Number.parseInt(direct, 10);
-    return Number.isFinite(parsed) ? parsed : null;
+  const candidates: Array<string | null | undefined> = [
+    row.getAttribute('data-line-number'),
+    (row as HTMLElement).dataset?.lineNumber,
+  ];
+
+  const nestedCell = row.querySelector<HTMLElement>('[data-line-number]');
+  if (nestedCell && nestedCell !== row) {
+    candidates.push(nestedCell.getAttribute('data-line-number'));
+    candidates.push(nestedCell.dataset?.lineNumber);
   }
 
-  const fallbackCell = row.querySelector<HTMLElement>('[data-line-number]');
-  if (!fallbackCell) {
-    return null;
+  const triggerElements = Array.from(
+    row.querySelectorAll<HTMLElement>('[id^="line-number-trigger-"], [aria-label^="Line"]'),
+  );
+  triggerElements.forEach((element) => {
+    const label = element.getAttribute('aria-label');
+    if (label) {
+      const match = label.match(/\d+/);
+      if (match) {
+        candidates.push(match[0]);
+      }
+    }
+    const text = element.textContent?.trim();
+    if (text) {
+      candidates.push(text);
+    }
+  });
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+    const parsed = Number.parseInt(candidate, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
   }
-  const fallback = fallbackCell.getAttribute('data-line-number');
-  if (!fallback) {
-    return null;
-  }
-  const parsed = Number.parseInt(fallback, 10);
-  return Number.isFinite(parsed) ? parsed : null;
+
+  return null;
 };
 
 const extractCodeText = (row: Element): string => {
-  const codeCell = row.querySelector<HTMLPreElement>('td.it__source-line-code pre');
+  const codeCell = row.querySelector<HTMLElement>('td.it__source-line-code');
   if (!codeCell) {
     return '';
   }
-  const text = codeCell.textContent ?? '';
-  return text.replace(/\u00a0/g, ' ').replace(/\r/g, '').replace(/\n$/, '');
+  const target = codeCell.querySelector<HTMLElement>('pre') ?? codeCell;
+  const text = target.textContent ?? '';
+  return text.replace(/\u00a0/g, ' ').replace(/\r\n?/g, '\n').replace(/\n$/, '');
 };
 
-const collectUncoveredLines = (): CoverageLine[] => {
-  const containers = Array.from(document.querySelectorAll('.source-viewer'));
-  if (!containers.length) {
-    return [];
-  }
-
+const collectUncoveredLines = (containers: Element[]): CoverageLine[] => {
   const lines = new Map<number, CoverageLine>();
 
   containers.forEach((container) => {
-    const indicators = Array.from(
-      container.querySelectorAll(`[aria-label="${NOT_COVERED_ARIA_LABEL}"]`),
-    );
-
-    indicators.forEach((indicator) => {
-      const row = indicator.closest('tr[data-line-number]');
-      if (!row) {
+    const rows = Array.from(container.querySelectorAll('tr[data-line-number]'));
+    rows.forEach((row) => {
+      if (!rowHasUncoveredIndicator(row)) {
         return;
       }
 
@@ -73,6 +149,8 @@ const collectUncoveredLines = (): CoverageLine[] => {
 
   return Array.from(lines.values()).sort((a, b) => a.lineNumber - b.lineNumber);
 };
+
+const findSourceContainers = (): Element[] => Array.from(document.querySelectorAll(SOURCE_CONTAINER_SELECTOR));
 
 const groupLines = (lines: CoverageLine[]): CoverageGroup[] => {
   if (!lines.length) {
@@ -130,9 +208,18 @@ const fallbackFilePathFromUrl = (url: URL): string => {
 };
 
 const buildCoverageReport = (): CoverageReport => {
-  const uncovered = collectUncoveredLines();
+  const containers = findSourceContainers();
+  if (!containers.length) {
+    throw new Error(
+      'Unable to locate the SonarQube source viewer. Open a file-level "Measures" view and try again.',
+    );
+  }
+
+  const uncovered = collectUncoveredLines(containers);
   if (!uncovered.length) {
-    throw new Error('No uncovered new-code lines detected on this view.');
+    throw new Error(
+      'No uncovered new-code lines detected. Ensure the "New Code" filter is active or that this file has uncovered lines.',
+    );
   }
 
   const groups = groupLines(uncovered);

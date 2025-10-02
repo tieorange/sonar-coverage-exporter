@@ -64,7 +64,7 @@ const guessLanguage = (filePath: string): string => {
 const formatRange = (group: CoverageGroup): string =>
   group.startLine === group.endLine
     ? `line ${group.startLine}`
-    : `lines ${group.startLine}\u2013${group.endLine}`;
+    : `lines ${group.startLine}-${group.endLine}`;
 
 const buildSnippet = (group: CoverageGroup): string => {
   const width = String(group.lines[group.lines.length - 1].lineNumber).length;
@@ -77,9 +77,17 @@ const buildSnippet = (group: CoverageGroup): string => {
     .join('\n');
 };
 
+const MAX_SUMMARY_LENGTH = 120;
+
 const summariseGroup = (group: CoverageGroup): string => {
   const snippet = group.lines.map((line) => line.code.trim()).find((entry) => entry.length > 0);
-  return snippet ?? '[blank line]';
+  if (!snippet) {
+    return '[blank line]';
+  }
+  if (snippet.length > MAX_SUMMARY_LENGTH) {
+    return `${snippet.slice(0, MAX_SUMMARY_LENGTH - 3)}...`;
+  }
+  return snippet;
 };
 
 const sanitiseForFileName = (input: string): string =>
@@ -105,7 +113,7 @@ export const generateMarkdown = (report: CoverageReport): { fileName: string; co
     .join('\n');
 
   const descriptiveBullets = report.groups
-    .map((group) => `- ${formatRange(group)} — ${summariseGroup(group)}`)
+    .map((group) => `- ${formatRange(group)} - ${summariseGroup(group)}`)
     .join('\n');
 
   const promptHeaderLines = report.groups.map((group) => `  * ${formatRange(group)}`).join('\n');
