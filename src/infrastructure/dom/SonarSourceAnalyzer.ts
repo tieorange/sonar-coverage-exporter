@@ -25,6 +25,7 @@ export interface CoverageExtractionOptions {
 export class SonarSourceAnalyzer {
   private readonly tooltipCache = new Map<string, string>();
   private extractionStats: CoverageExtractionStats | null = null;
+  private useIndicatorFallback = false;
 
   constructor(private readonly documentRef: Document) {}
 
@@ -37,6 +38,7 @@ export class SonarSourceAnalyzer {
     options: CoverageExtractionOptions = {},
   ): CoverageLineModel[] {
     const lines = new Map<number, CoverageLineModel>();
+    this.useIndicatorFallback = options.treatIndicatorAsNewCode ?? false;
     const stats: CoverageExtractionStats = {
       totalRows: 0,
       filteredRows: 0,
@@ -51,9 +53,11 @@ export class SonarSourceAnalyzer {
     containers.forEach((container) => {
       const rows = Array.from(container.querySelectorAll('tr[data-line-number]'));
       rows.forEach((row) => {
+        const codeCell = row.querySelector<HTMLElement>('td.it__source-line-code');
         const hasIndicator = this.rowHasUncoveredIndicator(row);
-        const isNewCode = this.isNewCodeRow(row);
-        const treatIndicator = options.treatIndicatorAsNewCode ?? false;
+        const hasExplicitMarker = this.containsNewCodeMarker(row as HTMLElement, codeCell ?? undefined);
+        const isHeuristic = !hasExplicitMarker && this.useIndicatorFallback && this.rowIndicatesFilteredNewCode(row as HTMLElement, codeCell ?? undefined);
+        const isNewCode = hasExplicitMarker || isHeuristic;
 
         stats.totalRows += 1;
         if ((row as HTMLElement).classList.contains('it__source-line-filtered')) {
@@ -70,7 +74,7 @@ export class SonarSourceAnalyzer {
           return;
         }
         if (hasIndicator && !isNewCode) {
-          if (!treatIndicator) {
+          if (!this.useIndicatorFallback) {
             stats.indicatorWithoutNewCodeRows += 1;
             return;
           }
@@ -89,7 +93,7 @@ export class SonarSourceAnalyzer {
         const code = this.extractCodeText(row);
         lines.set(lineNumber, new CoverageLineModel(lineNumber, code));
         stats.uncoveredNewCodeRows += 1;
-        if (hasIndicator && !isNewCode && treatIndicator) {
+        if (isHeuristic) {
           stats.heuristicNewCodeRows += 1;
           console.debug('[CoverageExtractor] Treating indicator-only row as new code', {
             debugLabel: options.debugLabel,
@@ -99,6 +103,7 @@ export class SonarSourceAnalyzer {
       });
     });
 
+    this.useIndicatorFallback = false;
     if (!stats.uncoveredNewCodeRows) {
       console.debug('[CoverageExtractor] No uncovered lines detected, stats snapshot:', stats);
     }
@@ -239,11 +244,11 @@ export class SonarSourceAnalyzer {
 
     const codeCell = row.querySelector<HTMLElement>('td.it__source-line-code');
 
-    if (this.rowIndicatesFilteredNewCode(row)) {
+    if (this.useIndicatorFallback && this.rowIndicatesFilteredNewCode(row as HTMLElement, codeCell ?? undefined)) {
       return true;
     }
 
-    if (this.containsNewCodeMarker(row, codeCell)) {
+    if (this.containsNewCodeMarker(row as HTMLElement, codeCell ?? undefined)) {
       return true;
     }
 
@@ -370,7 +375,7 @@ export class SonarSourceAnalyzer {
     return [r, g, b, alpha];
   }
 
-  private containsNewCodeMarker(row: HTMLElement, codeCell?: HTMLElement | null): boolean {
+  private containsNewCodeMarker(row: HTMLElement, codeCell?: HTMLElement): boolean {
     if (row.querySelector('[data-testid*="new-code"]')) {
       return true;
     }
@@ -383,16 +388,31 @@ export class SonarSourceAnalyzer {
       return true;
     }
 
-    return Boolean(codeCell?.querySelector('[data-testid*="new-code"]'));
+    if (codeCell?.querySelector('[data-testid*="new-code"]')) {
+      return true;
+    }
+
+    if (codeCell?.querySelector('[class*="new-code"]')) {
+      return true;
+    }
+
+    if (codeCell?.querySelector('[class*="underline"]')) {
+      return true;
+    }
+
+    return false;
   }
 
-  private rowIndicatesFilteredNewCode(row: HTMLElement): boolean {
+  private rowIndicatesFilteredNewCode(row: HTMLElement, codeCell?: HTMLElement): boolean {
     if (row.classList.contains('it__source-line-filtered')) {
       return true;
     }
 
-    const codeWrapper = row.querySelector<HTMLElement>('div[data-testid="new-code-underline"]');
-    if (codeWrapper) {
+    if (row.querySelector<HTMLElement>('div[data-testid="new-code-underline"]')) {
+      return true;
+    }
+
+    if (codeCell?.querySelector('[data-testid="new-code-underline"]')) {
       return true;
     }
 
