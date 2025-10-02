@@ -1,24 +1,16 @@
+import type {
+  CoverageLineDto,
+  CoverageGroupDto,
+  CoverageReportDto,
+} from './domain/coverage';
+
+export { CoverageLineModel, CoverageGroupModel, CoverageReportModel } from './domain/coverage';
+
+export type CoverageLine = CoverageLineDto;
+export type CoverageGroup = CoverageGroupDto;
+export type CoverageReport = CoverageReportDto;
+
 export type CoverageMessageType = 'COLLECT_COVERAGE' | 'COLLECT_ALL_COVERAGE';
-
-export interface CoverageLine {
-  lineNumber: number;
-  code: string;
-}
-
-export interface CoverageGroup {
-  startLine: number;
-  endLine: number;
-  lines: CoverageLine[];
-}
-
-export interface CoverageReport {
-  projectName: string;
-  filePath: string;
-  url: string;
-  generatedAt: string;
-  totalUncoveredLines: number;
-  groups: CoverageGroup[];
-}
 
 export type CollectCoverageMessage =
   | { type: 'COLLECT_COVERAGE' }
@@ -30,12 +22,15 @@ export interface CollectCoverageSuccess {
   report: CoverageReport;
 }
 
+export type CollectCoverageFailureReason = 'NO_NEW_COVERAGE' | 'UNEXPECTED_ERROR';
+
 export interface CollectCoverageFailure {
   success: false;
   url?: string;
   label?: string;
   error: string;
   details?: string;
+  reason?: CollectCoverageFailureReason;
 }
 
 export interface CollectAllCoverageSuccess {

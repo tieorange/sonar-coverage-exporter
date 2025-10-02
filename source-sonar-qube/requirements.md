@@ -19,57 +19,13 @@ Make our extension to be able to download all file reports and merge it into 1 r
 Source code of main page of SonarQube - `source-sonar-qube/master-page.html`
 
 -----
-What is wrong with my prompt? my AI tools don't add tests. They should write tests for me (my tools has such ability - you just need to ask them):
-tests.md - increase tests coverage for those
-
-• Explored
-  └ Read tests.md
-
-• Added tests.md (+21 -0)
-    1     +# Manual Test Checklist for AirPods Fix
-    2     +
-    3     +The automated tests cover happy-path and error-path logic for `AudioSettings` and
-            `SoundRecorder`. The following manual verifications help ensure the feature beha
-           ves correctly on real devices:
-    4     +
-    5     +1. **AirPods routing enabled**
-    6     +   - Toggle the remote feature flag `enable-airpods-experimental-fix` to `true`.
-    7     +   - Launch the app on iOS with AirPods connected.
-    8     +   - Start a practice session and begin recording; confirm audio input switches t
-           o the AirPods microphone.
-    9     +
-    10    +2. **AirPods routing disabled**
-    11    +   - Toggle the flag to `false`.
-    12    +  - Start a recording and background/foreground the app; ensure the recorder does
-            not attempt to reconfigure audio and the session remains stable.
-    13    +
-    14    +3. **Lifecycle cancellation**
-    15    +   - With the flag enabled, start recording, then background and return to the ap
-           p; verify the recording is cancelled and the UI returns to idle state.
-    16    +
-    17    +4. **Bluetooth device change**
-    18    +   - While recording with the flag enabled, disconnect and reconnect AirPods; con
-           firm the recorder cancels and restarts gracefully, routing audio correctly when t
-           he connection resumes.
-    19    +
-    20    +5. **Permission denied**
-    21    +   - Revoke microphone permissions in iOS settings, start a recording, and confir
-           m the app surfaces the no-permission dialog and the recorder returns to the initi
-           al state.
-
-> Manual QA Checklist (new in tests.md)
-
-  - Added a dedicated checklist describing how to manually exercise the AirPods routing
-  feature:
-      - Flag ON: confirm routing to AirPods when recording.
-      - Flag OFF: ensure no audio session reconfiguration and the session stays stable.
-      - Lifecycle resume: verify recording cancels when returning to the app.
-      - Bluetooth device changes: make sure cancel/restart works when AirPods disconnect/
-  reconnect.
-      - Permission denied: confirm UI handles missing mic access.
-
-  No code changes—just guidance for manual testing on top of the improved automated
-  coverage.
 ----
 Refactor code to use Clean code architecture. Also use classes and OOP approach. I am flutter/android dev. and not used to so much functions. I am used to OOP and classes, etc. Make code more readable also
 
+----
+Our extension should include in reports only New uncovered code (so the code that was added in my branch only).
+Old uncovered code should not be included in our reports
+New code in webpage marked with blue color background (under the code) and when you hover mouse over this blue background and code - it says "New code"
+Check source code of pages examples:
+- source-sonar-qube/master-page 2 .html
+- source-sonar-qube/master-page.html
