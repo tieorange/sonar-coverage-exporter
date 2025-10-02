@@ -5,11 +5,15 @@
   "scripts": {
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
-    "build": "npm run typecheck && esbuild src/content-script.ts src/popup.ts --bundle --sourcemap --outdir=dist --format=iife --target=chrome115"
+    "build": "npm run typecheck && esbuild src/content-script.ts src/popup.ts --bundle --sourcemap --outdir=dist --format=iife --target=chrome115",
+    "test": "node -r ./tests/register.js ./tests/run-tests.ts"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.261",
-    "typescript": "^5.4.0",
-    "esbuild": "^0.21.5"
+    "@types/jsdom": "^27.0.0",
+    "esbuild": "^0.21.5",
+    "jsdom": "^27.0.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.4.0"
   }
 }

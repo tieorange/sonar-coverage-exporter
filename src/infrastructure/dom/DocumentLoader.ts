@@ -1,14 +1,22 @@
 import { SourceContainerSelector } from './SonarSourceAnalyzer';
+import { EXPLICIT_NEW_CODE_SELECTORS } from './parsing/SourceRowParser';
 
 const DEFAULT_LOAD_TIMEOUT_MS = 20000;
 const WAIT_INTERVAL_MS = 300;
 const WAIT_TIMEOUT_MS = 12000;
 const SOURCE_ROW_SELECTOR = 'tr[data-line-number]';
-const NEW_CODE_SELECTOR = '[data-testid="new-code-underline"]';
+const NEW_CODE_SELECTORS = EXPLICIT_NEW_CODE_SELECTORS;
 
 const waitForElement = (
   doc: Document,
   selector: string,
+  timeoutMs: number,
+  intervalMs: number,
+): Promise<void> => waitForSelectors(doc, [selector], timeoutMs, intervalMs);
+
+const waitForSelectors = (
+  doc: Document,
+  selectors: readonly string[],
   timeoutMs: number,
   intervalMs: number,
 ): Promise<void> =>
@@ -16,12 +24,12 @@ const waitForElement = (
     const start = Date.now();
 
     const check = () => {
-      if (doc.querySelector(selector)) {
+      if (selectors.some((selector) => doc.querySelector(selector))) {
         resolve();
         return;
       }
       if (Date.now() - start >= timeoutMs) {
-        reject(new Error(`Timed out waiting for selector: ${selector}`));
+        reject(new Error(`Timed out waiting for selectors: ${selectors.join(', ')}`));
         return;
       }
       window.setTimeout(check, intervalMs);
@@ -79,7 +87,7 @@ export class DocumentLoader {
         waitForElement(iframeDoc, SourceContainerSelector, WAIT_TIMEOUT_MS, WAIT_INTERVAL_MS)
           .then(() => waitForElement(iframeDoc, SOURCE_ROW_SELECTOR, WAIT_TIMEOUT_MS, WAIT_INTERVAL_MS))
           .then(() =>
-            waitForElement(iframeDoc, NEW_CODE_SELECTOR, 3000, 200).catch(() => {
+            waitForSelectors(iframeDoc, NEW_CODE_SELECTORS, 3000, 200).catch(() => {
               console.debug('[DocumentLoader] No explicit new-code markers detected within timeout; continuing.');
               return undefined;
             }),

@@ -44,7 +44,7 @@ export class CoverageReportBuilder {
     });
     let stats = analyzer.getLastExtractionStats();
 
-    if (!uncoveredLines.length && treatIndicator && stats && stats.uncoveredIndicatorRows > 0) {
+    if (!uncoveredLines.length && this.shouldRetryWithIndicatorFallback(treatIndicator, stats)) {
       console.debug('[CoverageReportBuilder] Retrying extraction with indicator heuristic', {
         url: url.toString(),
         debugLabel,
@@ -116,6 +116,25 @@ export class CoverageReportBuilder {
       return true;
     }
     return url.searchParams.has('pullRequest');
+  }
+
+  private shouldRetryWithIndicatorFallback(
+    treatIndicator: boolean,
+    stats: CoverageExtractionStats | null | undefined,
+  ): boolean {
+    if (!treatIndicator || !stats) {
+      return false;
+    }
+
+    if (stats.indicatorWithoutNewCodeRows > 0) {
+      return true;
+    }
+
+    if (stats.filteredRows > 0 && stats.uncoveredIndicatorRows > 0) {
+      return true;
+    }
+
+    return false;
   }
 
   private friendlyFileLabel(url: URL): string {
